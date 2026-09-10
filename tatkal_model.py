@@ -411,21 +411,21 @@ def default_tiers() -> List[TierInput]:
             seats_per_day=90000, requests_per_day=500000, avg_base_fare=400,
             current_surcharge_pct=10, current_min_charge=20, current_max_charge=200,
             proposed_flat_fee=20,
-            proposed_premium_pct=5, proposed_min_premium=5, proposed_max_premium=100,
+            proposed_premium_pct=5, proposed_min_premium=20, proposed_max_premium=200,
         ),
         TierInput(
             name="Mid-AC (CC / 3AC)",
             seats_per_day=40000, requests_per_day=300000, avg_base_fare=900,
             current_surcharge_pct=30, current_min_charge=125, current_max_charge=225,
             proposed_flat_fee=40,
-            proposed_premium_pct=15, proposed_min_premium=65, proposed_max_premium=115,
+            proposed_premium_pct=15, proposed_min_premium=125, proposed_max_premium=225,
         ),
         TierInput(
             name="Upper-AC (2AC / Executive)",
             seats_per_day=20000, requests_per_day=150000, avg_base_fare=1500,
             current_surcharge_pct=30, current_min_charge=400, current_max_charge=500,
             proposed_flat_fee=60,
-            proposed_premium_pct=15, proposed_min_premium=200, proposed_max_premium=250,
+            proposed_premium_pct=15, proposed_min_premium=400, proposed_max_premium=500,
         ),
     ]
 
