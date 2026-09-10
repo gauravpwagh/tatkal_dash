@@ -319,16 +319,6 @@ with tab_compare:
         st.bar_chart(vol_df)
 
     st.divider()
-    st.markdown("**Denial rate (% of applicants who do not get a seat)**")
-    st.caption(
-        "Under the current FCFS system this isn't a clean 'sold out' notice -- "
-        "heavy load at the burst window means most of these applicants are kept "
-        "waiting or told to try again as seat locks are repeatedly grabbed and "
-        "released, which is where the frustration comes from."
-    )
-    st.bar_chart(summary_df.set_index("Scenario")[["Denial rate %"]])
-
-    st.divider()
     st.subheader("Tier-level detail")
     scenario_pick = st.selectbox(
         "View tier-level breakdown for:",
@@ -428,23 +418,14 @@ with tab_export:
         vol_df = summary_df.set_index("Scenario")[
             ["Successful/day", "Unsuccessful (lost seat)/day", "Denied access (locked out)/day"]
         ]
-        fig, ax = plt.subplots(figsize=(6, 4))
+        fig, ax = plt.subplots(figsize=(9, 4))
         vol_df.plot(kind="bar", ax=ax)
         ax.set_title("Successful / unsuccessful / denied-access applications/day")
         ax.set_xlabel("")
         ax.tick_params(axis="x", rotation=15)
-        ax.legend(fontsize=7)
+        ax.legend(fontsize=8)
         fig.tight_layout()
-        return _make_chart_image(fig, width_cm=13)
-
-    def _denial_chart(summary_df: pd.DataFrame) -> Image:
-        fig, ax = plt.subplots(figsize=(6, 4))
-        summary_df.set_index("Scenario")["Denial rate %"].plot(kind="bar", ax=ax, color="#dc2626")
-        ax.set_title("Denial rate (% of applicants who do not get a seat)")
-        ax.set_xlabel("")
-        ax.tick_params(axis="x", rotation=15)
-        fig.tight_layout()
-        return _make_chart_image(fig, width_cm=13)
+        return _make_chart_image(fig, width_cm=24)
 
     def build_pdf_report() -> bytes:
         buf = io.BytesIO()
@@ -521,12 +502,7 @@ with tab_export:
         story.append(Paragraph("Scenario comparison charts", styles["Heading2"]))
         story.append(_revenue_chart(summary_df))
         story.append(Spacer(1, 0.3 * cm))
-        chart_row = Table(
-            [[_volume_chart(summary_df), _denial_chart(summary_df)]],
-            colWidths=[13.5 * cm, 13.5 * cm],
-        )
-        chart_row.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP")]))
-        story.append(chart_row)
+        story.append(_volume_chart(summary_df))
         story.append(Paragraph(
             "Note on denial rate: under the current FCFS system this isn't a clean "
             "'sold out' notice -- heavy load at the burst window means most of these "
