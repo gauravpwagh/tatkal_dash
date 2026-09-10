@@ -276,7 +276,7 @@ with tab_compare:
         f"**{st.session_state.surge_multiplier:g}x** today's level while seats stay fixed."
     )
 
-    display_df = summary_df.set_index("Scenario").copy()
+    display_df = summary_df.drop(columns=["Denial rate %"]).set_index("Scenario").copy()
     display_df["Revenue (INR/day)"] = display_df["Revenue (INR/day)"].apply(format_inr)
     display_df["Overhead (INR/day)"] = display_df["Overhead (INR/day)"].apply(format_inr)
     display_df["Net revenue (INR/day)"] = display_df["Net revenue (INR/day)"].apply(format_lakhs)
@@ -535,13 +535,9 @@ with tab_export:
             f"net revenue changes by {format_lakhs(rev_delta_c)}/day versus Current, "
             f"and overhead moves from {format_inr(current.total_overhead)}/day to "
             f"{format_inr(proposed_surge.total_overhead)}/day.",
-            f"Denial rate moves from {current.denial_rate_pct:.1f}% (Current) to "
-            f"{proposed.denial_rate_pct:.1f}% (Proposed, same demand) to "
-            f"{proposed_surge.denial_rate_pct:.1f}% (Proposed, surge demand).",
-            f"Of Current's {current.denial_rate_pct:.1f}% denial rate, "
-            f"{current.access_denied_pct:.1f} points are applicants denied access "
-            f"outright by infra capacity (never got to compete for a seat) and "
-            f"{current.seat_lottery_denial_pct:.1f} points lost the seat lottery after "
+            f"Under Current, {current.access_denied_pct:.1f}% of demand is denied "
+            f"access outright by infra capacity (never got to compete for a seat) "
+            f"and {current.seat_lottery_denial_pct:.1f}% lost the seat lottery after "
             f"getting in. The Proposed system is designed for 0% denied access at "
             f"any demand level -- everyone gets into the process.",
         ]:
