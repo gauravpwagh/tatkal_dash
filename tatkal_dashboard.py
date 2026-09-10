@@ -307,7 +307,7 @@ with tab_compare:
         chart_df = summary_df.set_index("Scenario")[
             ["Revenue (INR/day)", "Overhead (INR/day)", "Net revenue (INR/day)"]
         ]
-        st.bar_chart(chart_df, stack=False)
+        st.bar_chart(chart_df, stack=False, horizontal=True, sort=False)
 
     with chart_col2:
         st.markdown("**Successful / unsuccessful / denied-access applications/day**")
@@ -320,7 +320,7 @@ with tab_compare:
         vol_df = summary_df.set_index("Scenario")[
             ["Successful/day", "Unsuccessful (lost seat)/day", "Denied access (locked out)/day"]
         ]
-        st.bar_chart(vol_df)
+        st.bar_chart(vol_df, sort=False)
 
     st.divider()
     st.subheader("Tier-level detail")
