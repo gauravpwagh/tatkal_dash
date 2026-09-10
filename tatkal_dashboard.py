@@ -300,10 +300,14 @@ with tab_compare:
 
     with chart_col1:
         st.markdown("**Revenue vs. overhead vs. net revenue (INR/day)**")
+        st.caption(
+            "Bars are grouped, not stacked -- Net revenue = Revenue - Overhead, "
+            "so stacking all three would double-count."
+        )
         chart_df = summary_df.set_index("Scenario")[
             ["Revenue (INR/day)", "Overhead (INR/day)", "Net revenue (INR/day)"]
         ]
-        st.bar_chart(chart_df)
+        st.bar_chart(chart_df, stack=False)
 
     with chart_col2:
         st.markdown("**Successful / unsuccessful / denied-access applications/day**")
