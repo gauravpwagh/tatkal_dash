@@ -307,7 +307,10 @@ with tab_compare:
         chart_df = summary_df.set_index("Scenario")[
             ["Revenue (INR/day)", "Overhead (INR/day)", "Net revenue (INR/day)"]
         ]
-        st.bar_chart(chart_df, stack=False, horizontal=True, sort=False)
+        st.bar_chart(
+            chart_df, stack=False, horizontal=True, sort=False,
+            color=["#2563eb", "#dc2626", "#16a34a"],  # Revenue=blue, Overhead=red, Net revenue=green
+        )
 
     with chart_col2:
         st.markdown("**Successful / unsuccessful / denied-access applications/day**")
@@ -409,7 +412,8 @@ with tab_export:
             ["Revenue (INR/day)", "Overhead (INR/day)", "Net revenue (INR/day)"]
         ]
         fig, ax = plt.subplots(figsize=(9, 4))
-        chart_df.plot(kind="bar", ax=ax)
+        # Revenue=blue, Overhead=red, Net revenue=green -- matches the dashboard chart.
+        chart_df.plot(kind="bar", ax=ax, color=["#2563eb", "#dc2626", "#16a34a"])
         ax.set_title("Revenue vs. overhead vs. net revenue (INR/day)")
         ax.yaxis.set_major_formatter(mticker.FuncFormatter(_indian_axis))
         ax.set_xlabel("")
