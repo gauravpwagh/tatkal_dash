@@ -32,6 +32,21 @@ multiplier applied to requests, while seat availability (capacity)
 stays fixed -- this models "more people apply because entry is cheap
 and low-risk, but the number of seats doesn't change".
 
+Two distinct ways to NOT get a ticket are modelled separately, only
+for CURRENT:
+  - denied_access : never got into the process at all. The current
+                     system's burst-load infra can only absorb
+                     `current_infra_cost_per_day /
+                     current_infra_required_cost_per_day` of demand
+                     (capped at 100%); the rest are turned away by an
+                     overloaded system before they ever compete for a
+                     seat. PROPOSED is modelled as always 100%
+                     accessible (0 denied_access), since spreading
+                     intake over an extended window instead of a
+                     single burst is the whole point of the reform.
+  - unsuccessful   : got into the process but lost the seat lottery
+                     (ordinary scarcity -- requests > seats).
+
 All monetary values are in INR. All "per day" figures are daily unless
 otherwise stated.
 """
@@ -74,6 +89,13 @@ class OverheadAssumptions:
 
     # --- Current system overhead ---
     current_infra_cost_per_day: float
+    # What the current (burst-load) system would need to spend per day to
+    # give every applicant access to the booking process during the
+    # burst window (no one turned away by an overloaded server). Actual
+    # spend is often well below this -- the gap between the two is what
+    # drives `denied_access` below: applicants who never even got in,
+    # as distinct from applicants who got in but lost the seat lottery.
+    current_infra_required_cost_per_day: float
     # Average number of times a seat is locked (and possibly released back
     # to the pool) before a payment finally succeeds, under the current
     # burst/race mechanism. 1.0 = no repeated locking. See technical report
@@ -104,6 +126,11 @@ class TierResult:
     unsuccessful: float
     applications: float
     revenue: float
+    # Applicants who never got INTO the process at all -- distinct from
+    # `unsuccessful`, which counts applicants who entered the process
+    # (submitted a request) but lost the seat lottery. Always 0 for the
+    # proposed system, which is modelled as fully accessible by design.
+    denied_access: float = 0.0
 
 
 @dataclass
@@ -118,25 +145,46 @@ class ScenarioResult:
     total_applications: float
     total_revenue: float
     total_overhead: float
+    total_denied_access: float = 0.0
 
     @property
     def net_revenue(self) -> float:
         return self.total_revenue - self.total_overhead
 
     @property
-    def denial_rate_pct(self) -> float:
-        """Share of applicants who do NOT get a seat.
-
-        Under the current FCFS system this isn't a clean "sold out"
-        message -- heavy load at the burst window means most of these
-        applicants are kept waiting or told to try again as seat
-        locks are repeatedly grabbed and released (see
-        `lock_release_multiplier`), which is where the frustration
-        comes from, not just the eventual failure to book.
+    def access_denied_pct(self) -> float:
+        """Share of applicants turned away by the system itself -- they
+        never got a chance to compete for a seat because the infra
+        couldn't absorb the burst load (see
+        `OverheadAssumptions.current_infra_required_cost_per_day`).
+        Always 0 for the proposed system.
         """
-        if self.total_applications == 0:
+        if self.total_requests == 0:
             return 0.0
-        return 100.0 * self.total_unsuccessful / self.total_applications
+        return 100.0 * self.total_denied_access / self.total_requests
+
+    @property
+    def seat_lottery_denial_pct(self) -> float:
+        """Share of applicants who entered the process (got in) but did
+        not win a seat -- ordinary scarcity, not an infra failure.
+        """
+        if self.total_requests == 0:
+            return 0.0
+        return 100.0 * self.total_unsuccessful / self.total_requests
+
+    @property
+    def denial_rate_pct(self) -> float:
+        """Total share of applicants who do NOT get a seat, for any reason.
+
+        Combines two distinct failure modes: applicants denied ACCESS to
+        the process outright because the infra couldn't absorb the burst
+        load (`access_denied_pct`), and applicants who got in but lost
+        the seat lottery (`seat_lottery_denial_pct`). Under the current
+        FCFS system the first group is usually the bigger, more
+        frustrating one -- not a clean "sold out" message, but being
+        kept waiting or told to try again as the servers buckle.
+        """
+        return self.access_denied_pct + self.seat_lottery_denial_pct
 
     def as_dict(self) -> Dict:
         return {
@@ -144,7 +192,8 @@ class ScenarioResult:
             "Total seats/day": round(self.total_seats),
             "Total requests/day": round(self.total_requests),
             "Successful/day": round(self.total_successful),
-            "Unsuccessful/day": round(self.total_unsuccessful),
+            "Unsuccessful (lost seat)/day": round(self.total_unsuccessful),
+            "Denied access (locked out)/day": round(self.total_denied_access),
             "Denial rate %": round(self.denial_rate_pct, 1),
             "Revenue (INR/day)": round(self.total_revenue),
             "Overhead (INR/day)": round(self.total_overhead),
@@ -173,20 +222,36 @@ def compute_current(tiers: List[TierInput], overhead: OverheadAssumptions) -> Sc
     Revenue is earned only from successful bookers, at the current
     percentage-of-fare surcharge (clipped to min/max).
 
+    Access is gated by infra capacity BEFORE the seat lottery even runs:
+    `current_infra_cost_per_day / current_infra_required_cost_per_day`
+    caps the share of applicants who can get into the process at all
+    (capped at 100%). Applicants beyond that cap are `denied_access` --
+    turned away by an overloaded system, never even competing for a
+    seat -- distinct from `unsuccessful`, which counts applicants who
+    got in but lost the seat lottery.
+
     Overhead = flat peak-infrastructure cost + cost of failed payment
     attempts generated by the seat lock-and-release cycle (each confirmed
     seat is assumed to have gone through `lock_release_multiplier` payment
     attempts on average before succeeding; all attempts beyond the first
     successful one are treated as failures needing support/reconciliation).
     """
+    capacity_pct = 1.0
+    if overhead.current_infra_required_cost_per_day > 0:
+        capacity_pct = min(
+            1.0, overhead.current_infra_cost_per_day / overhead.current_infra_required_cost_per_day
+        )
+
     tier_results = []
     total_seats = total_requests = total_successful = total_unsuccessful = 0.0
-    total_applications = total_revenue = 0.0
+    total_applications = total_revenue = total_denied_access = 0.0
     total_payment_attempts = 0.0
 
     for t in tiers:
-        successful = min(t.seats_per_day, t.requests_per_day)
-        unsuccessful = max(0.0, t.requests_per_day - successful)
+        accessible = t.requests_per_day * capacity_pct
+        denied_access = max(0.0, t.requests_per_day - accessible)
+        successful = min(t.seats_per_day, accessible)
+        unsuccessful = max(0.0, accessible - successful)
         charge = _clip(t.current_surcharge_pct / 100.0 * t.avg_base_fare,
                         t.current_min_charge, t.current_max_charge)
         revenue = successful * charge
@@ -194,15 +259,16 @@ def compute_current(tiers: List[TierInput], overhead: OverheadAssumptions) -> Sc
 
         tier_results.append(TierResult(
             name=t.name, successful=successful, unsuccessful=unsuccessful,
-            applications=t.requests_per_day, revenue=revenue,
+            applications=accessible, revenue=revenue, denied_access=denied_access,
         ))
 
         total_seats += t.seats_per_day
         total_requests += t.requests_per_day
         total_successful += successful
         total_unsuccessful += unsuccessful
-        total_applications += t.requests_per_day
+        total_applications += accessible
         total_revenue += revenue
+        total_denied_access += denied_access
         total_payment_attempts += payment_attempts
 
     failed_payment_attempts = max(0.0, total_payment_attempts - total_successful)
@@ -216,7 +282,7 @@ def compute_current(tiers: List[TierInput], overhead: OverheadAssumptions) -> Sc
         total_seats=total_seats, total_requests=total_requests,
         total_successful=total_successful, total_unsuccessful=total_unsuccessful,
         total_applications=total_applications, total_revenue=total_revenue,
-        total_overhead=total_overhead,
+        total_overhead=total_overhead, total_denied_access=total_denied_access,
     )
 
 
@@ -233,6 +299,12 @@ def compute_proposed(tiers: List[TierInput], overhead: OverheadAssumptions,
     `demand_multiplier` scales requests/applications only -- capacity
     (seats_per_day) is held fixed, which is exactly the "more people
     apply, same number of seats" scenario the tool is meant to explore.
+
+    Unlike the current system, access here is NOT gated by infra
+    capacity: the whole point of spreading intake over an extended
+    window instead of a single burst is that every applicant gets in
+    (`denied_access` stays 0 throughout). Applicants may still lose the
+    seat lottery, but nobody is turned away by the system itself.
 
     Overhead = flat (lower) infrastructure cost + verification cost per
     application (ALL applications, win or lose) + refund/release
@@ -342,7 +414,8 @@ def default_tiers() -> List[TierInput]:
 
 def default_overhead() -> OverheadAssumptions:
     return OverheadAssumptions(
-        current_infra_cost_per_day=5_000_000,        # INR 50 lakh/day, illustrative
+        current_infra_cost_per_day=1_500_000,          # INR 15 lakh/day, illustrative -- actual spend
+        current_infra_required_cost_per_day=5_000_000, # INR 50 lakh/day, illustrative -- needed for 100% access
         lock_release_multiplier=2.5,
         payment_failure_cost=15,
         proposed_infra_cost_per_day=1_500_000,        # INR 15 lakh/day, illustrative

@@ -190,9 +190,26 @@ with tab_inputs:
     with col1:
         st.markdown("**Current system**")
         oh.current_infra_cost_per_day = st.number_input(
-            "Current peak-infrastructure cost (INR/day)",
+            "Current actual infrastructure spend (INR/day)",
             min_value=0.0, value=float(oh.current_infra_cost_per_day), step=100000.0,
-            help="Cost of provisioning servers/gateways to survive the current burst window.",
+            help="What's actually spent on servers/gateways for the current burst window.",
+        )
+        oh.current_infra_required_cost_per_day = st.number_input(
+            "Infra spend required for 100% access (INR/day)",
+            min_value=0.0, value=float(oh.current_infra_required_cost_per_day), step=100000.0,
+            help="What it would cost to give every applicant access to the booking "
+                 "process during the burst -- i.e. nobody turned away by an "
+                 "overloaded server. The gap between this and actual spend above "
+                 "determines how many applicants are denied access outright.",
+        )
+        _capacity_pct = (
+            min(1.0, oh.current_infra_cost_per_day / oh.current_infra_required_cost_per_day)
+            if oh.current_infra_required_cost_per_day > 0 else 1.0
+        )
+        st.caption(
+            f"→ Current system infra capacity: **{_capacity_pct * 100:.0f}%** of demand can "
+            f"even enter the process at today's spend. The rest are denied access outright, "
+            f"separate from those who enter and lose the seat lottery."
         )
         oh.lock_release_multiplier = st.number_input(
             "Avg. lock/payment attempts per confirmed seat",
@@ -211,6 +228,11 @@ with tab_inputs:
             "Proposed peak-infrastructure cost (INR/day)",
             min_value=0.0, value=float(oh.proposed_infra_cost_per_day), step=100000.0,
             help="Cost of provisioning for a smoothed, extended-window arrival pattern instead of a burst.",
+        )
+        st.caption(
+            "→ Proposed system infra capacity: **100%** by design -- spreading "
+            "intake over an extended window instead of a single burst means "
+            "nobody is denied access outright, at any demand level."
         )
         oh.verification_cost_per_application = st.number_input(
             "Verification / fraud-screening cost per application (INR)",
@@ -267,6 +289,12 @@ with tab_compare:
     c3.metric("Net revenue -- Proposed + surge", f"{format_lakhs(proposed_surge.net_revenue)}/day",
               delta=f"{format_lakhs(proposed_surge.net_revenue - current.net_revenue)}")
 
+    c4, c5, c6 = st.columns(3)
+    c4.metric("Locked out of system -- Current", f"{current.access_denied_pct:.0f}%",
+              help="Applicants denied access outright by infra capacity, before the seat lottery even runs.")
+    c5.metric("Locked out of system -- Proposed", f"{proposed.access_denied_pct:.0f}%")
+    c6.metric("Locked out of system -- Proposed + surge", f"{proposed_surge.access_denied_pct:.0f}%")
+
     st.divider()
     chart_col1, chart_col2 = st.columns(2)
 
@@ -278,8 +306,16 @@ with tab_compare:
         st.bar_chart(chart_df)
 
     with chart_col2:
-        st.markdown("**Successful vs. unsuccessful applications/day**")
-        vol_df = summary_df.set_index("Scenario")[["Successful/day", "Unsuccessful/day"]]
+        st.markdown("**Successful / unsuccessful / denied-access applications/day**")
+        st.caption(
+            "'Unsuccessful' entered the process but lost the seat lottery. "
+            "'Denied access' were turned away by the system itself -- infra "
+            "capacity, not seat scarcity. The current system shows both; the "
+            "proposed system is designed for zero denied access."
+        )
+        vol_df = summary_df.set_index("Scenario")[
+            ["Successful/day", "Unsuccessful (lost seat)/day", "Denied access (locked out)/day"]
+        ]
         st.bar_chart(vol_df)
 
     st.divider()
@@ -303,7 +339,8 @@ with tab_compare:
     tier_detail_df = pd.DataFrame([{
         "Tier": tr.name,
         "Successful/day": round(tr.successful),
-        "Unsuccessful/day": round(tr.unsuccessful),
+        "Unsuccessful (lost seat)/day": round(tr.unsuccessful),
+        "Denied access (locked out)/day": round(tr.denied_access),
         "Applications/day": round(tr.applications),
         "Revenue (INR/day)": format_inr(tr.revenue),
     } for tr in picked.tier_results])
@@ -388,13 +425,15 @@ with tab_export:
         return _make_chart_image(fig, width_cm=24)
 
     def _volume_chart(summary_df: pd.DataFrame) -> Image:
-        vol_df = summary_df.set_index("Scenario")[["Successful/day", "Unsuccessful/day"]]
+        vol_df = summary_df.set_index("Scenario")[
+            ["Successful/day", "Unsuccessful (lost seat)/day", "Denied access (locked out)/day"]
+        ]
         fig, ax = plt.subplots(figsize=(6, 4))
         vol_df.plot(kind="bar", ax=ax)
-        ax.set_title("Successful vs. unsuccessful applications/day")
+        ax.set_title("Successful / unsuccessful / denied-access applications/day")
         ax.set_xlabel("")
         ax.tick_params(axis="x", rotation=15)
-        ax.legend(fontsize=8)
+        ax.legend(fontsize=7)
         fig.tight_layout()
         return _make_chart_image(fig, width_cm=13)
 
@@ -445,11 +484,18 @@ with tab_export:
 
         story.append(Paragraph("1.2 System overhead assumptions", styles["Heading2"]))
         oh = st.session_state.overhead
+        _capacity_pct_report = (
+            min(1.0, oh.current_infra_cost_per_day / oh.current_infra_required_cost_per_day)
+            if oh.current_infra_required_cost_per_day > 0 else 1.0
+        )
         for line in [
-            f"Current peak-infrastructure cost: {format_inr(oh.current_infra_cost_per_day)}/day",
+            f"Current actual infrastructure spend: {format_inr(oh.current_infra_cost_per_day)}/day",
+            f"Infra spend required for 100% access: {format_inr(oh.current_infra_required_cost_per_day)}/day "
+            f"(→ current system infra capacity: {_capacity_pct_report * 100:.0f}%)",
             f"Avg. lock/payment attempts per confirmed seat: {oh.lock_release_multiplier:g}",
             f"Cost per failed payment attempt: INR {oh.payment_failure_cost:g}",
-            f"Proposed peak-infrastructure cost: {format_inr(oh.proposed_infra_cost_per_day)}/day",
+            f"Proposed peak-infrastructure cost: {format_inr(oh.proposed_infra_cost_per_day)}/day "
+            f"(→ proposed system infra capacity: 100% by design)",
             f"Verification cost per application: INR {oh.verification_cost_per_application:g}",
             f"Refund/release cost per unsuccessful applicant: INR {oh.refund_processing_cost_per_unsuccessful:g}",
             f"Scenario C demand multiplier: {st.session_state.surge_multiplier:g}x",
@@ -503,6 +549,12 @@ with tab_export:
             f"Denial rate moves from {current.denial_rate_pct:.1f}% (Current) to "
             f"{proposed.denial_rate_pct:.1f}% (Proposed, same demand) to "
             f"{proposed_surge.denial_rate_pct:.1f}% (Proposed, surge demand).",
+            f"Of Current's {current.denial_rate_pct:.1f}% denial rate, "
+            f"{current.access_denied_pct:.1f} points are applicants denied access "
+            f"outright by infra capacity (never got to compete for a seat) and "
+            f"{current.seat_lottery_denial_pct:.1f} points lost the seat lottery after "
+            f"getting in. The Proposed system is designed for 0% denied access at "
+            f"any demand level -- everyone gets into the process.",
         ]:
             story.append(Paragraph(f"&bull; {line}", styles["Normal"]))
 
@@ -513,7 +565,8 @@ with tab_export:
             story.append(Paragraph(label, styles["Heading2"]))
             tdf = pd.DataFrame([{
                 "Tier": tr.name, "Successful/day": round(tr.successful),
-                "Unsuccessful/day": round(tr.unsuccessful),
+                "Unsuccessful (lost seat)/day": round(tr.unsuccessful),
+                "Denied access (locked out)/day": round(tr.denied_access),
                 "Applications/day": round(tr.applications),
                 "Revenue (INR/day)": format_inr(tr.revenue),
             } for tr in res.tier_results])
