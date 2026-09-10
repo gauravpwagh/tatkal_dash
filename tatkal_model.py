@@ -131,6 +131,13 @@ class TierResult:
     # (submitted a request) but lost the seat lottery. Always 0 for the
     # proposed system, which is modelled as fully accessible by design.
     denied_access: float = 0.0
+    # Revenue split by stream. `flat_fee_revenue` is paid by every
+    # applicant regardless of outcome -- always 0 under Current, which has
+    # no flat-fee stream. `charge_revenue` is paid only by successful
+    # bookers: the Tatkal surcharge under Current, the reduced premium
+    # under Proposed. flat_fee_revenue + charge_revenue == revenue.
+    flat_fee_revenue: float = 0.0
+    charge_revenue: float = 0.0
 
 
 @dataclass
@@ -146,6 +153,8 @@ class ScenarioResult:
     total_revenue: float
     total_overhead: float
     total_denied_access: float = 0.0
+    total_flat_fee_revenue: float = 0.0
+    total_charge_revenue: float = 0.0
 
     @property
     def net_revenue(self) -> float:
@@ -195,6 +204,8 @@ class ScenarioResult:
             "Unsuccessful (lost seat)/day": round(self.total_unsuccessful),
             "Denied access (locked out)/day": round(self.total_denied_access),
             "Denial rate %": round(self.denial_rate_pct, 1),
+            "Flat fee revenue (INR/day)": round(self.total_flat_fee_revenue),
+            "Charge/premium revenue (INR/day)": round(self.total_charge_revenue),
             "Revenue (INR/day)": round(self.total_revenue),
             "Overhead (INR/day)": round(self.total_overhead),
             "Net revenue (INR/day)": round(self.net_revenue),
@@ -260,6 +271,7 @@ def compute_current(tiers: List[TierInput], overhead: OverheadAssumptions) -> Sc
         tier_results.append(TierResult(
             name=t.name, successful=successful, unsuccessful=unsuccessful,
             applications=accessible, revenue=revenue, denied_access=denied_access,
+            charge_revenue=revenue,  # Current has no flat-fee stream -- all revenue is the surcharge.
         ))
 
         total_seats += t.seats_per_day
@@ -283,6 +295,7 @@ def compute_current(tiers: List[TierInput], overhead: OverheadAssumptions) -> Sc
         total_successful=total_successful, total_unsuccessful=total_unsuccessful,
         total_applications=total_applications, total_revenue=total_revenue,
         total_overhead=total_overhead, total_denied_access=total_denied_access,
+        total_flat_fee_revenue=0.0, total_charge_revenue=total_revenue,
     )
 
 
@@ -313,6 +326,7 @@ def compute_proposed(tiers: List[TierInput], overhead: OverheadAssumptions,
     tier_results = []
     total_seats = total_requests = total_successful = total_unsuccessful = 0.0
     total_applications = total_revenue = 0.0
+    total_flat_fee_revenue = total_charge_revenue = 0.0
 
     for t in tiers:
         requests = t.requests_per_day * demand_multiplier
@@ -329,6 +343,7 @@ def compute_proposed(tiers: List[TierInput], overhead: OverheadAssumptions,
         tier_results.append(TierResult(
             name=t.name, successful=successful, unsuccessful=unsuccessful,
             applications=applications, revenue=revenue,
+            flat_fee_revenue=flat_fee_revenue, charge_revenue=premium_revenue,
         ))
 
         total_seats += t.seats_per_day
@@ -337,6 +352,8 @@ def compute_proposed(tiers: List[TierInput], overhead: OverheadAssumptions,
         total_unsuccessful += unsuccessful
         total_applications += applications
         total_revenue += revenue
+        total_flat_fee_revenue += flat_fee_revenue
+        total_charge_revenue += premium_revenue
 
     total_overhead = (overhead.proposed_infra_cost_per_day
                        + total_applications * overhead.verification_cost_per_application
@@ -357,6 +374,7 @@ def compute_proposed(tiers: List[TierInput], overhead: OverheadAssumptions,
         total_successful=total_successful, total_unsuccessful=total_unsuccessful,
         total_applications=total_applications, total_revenue=total_revenue,
         total_overhead=total_overhead,
+        total_flat_fee_revenue=total_flat_fee_revenue, total_charge_revenue=total_charge_revenue,
     )
 
 

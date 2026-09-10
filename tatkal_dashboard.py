@@ -277,6 +277,8 @@ with tab_compare:
     )
 
     display_df = summary_df.drop(columns=["Denial rate %"]).set_index("Scenario").copy()
+    display_df["Flat fee revenue (INR/day)"] = display_df["Flat fee revenue (INR/day)"].apply(format_inr)
+    display_df["Charge/premium revenue (INR/day)"] = display_df["Charge/premium revenue (INR/day)"].apply(format_inr)
     display_df["Revenue (INR/day)"] = display_df["Revenue (INR/day)"].apply(format_inr)
     display_df["Overhead (INR/day)"] = display_df["Overhead (INR/day)"].apply(format_inr)
     display_df["Net revenue (INR/day)"] = display_df["Net revenue (INR/day)"].apply(format_lakhs)
@@ -330,6 +332,22 @@ with tab_compare:
         )
 
     st.divider()
+    st.markdown("**Revenue by stream (INR/day)**")
+    st.caption(
+        "Flat fee is paid by every applicant, win or lose -- 0 under Current, "
+        "which has no flat-fee stream. Charge/premium is paid only by successful "
+        "bookers: the Tatkal surcharge under Current, the reduced premium under "
+        "Proposed. The two bars are stacked because they genuinely sum to Revenue."
+    )
+    stream_df = summary_df.set_index("Scenario")[
+        ["Flat fee revenue (INR/day)", "Charge/premium revenue (INR/day)"]
+    ]
+    st.bar_chart(
+        stream_df, sort=False, horizontal=True,
+        color=["#7c3aed", "#0891b2"],  # Flat fee=violet, Charge/premium=teal
+    )
+
+    st.divider()
     st.subheader("Tier-level detail")
     scenario_pick = st.selectbox(
         "View tier-level breakdown for:",
@@ -343,6 +361,8 @@ with tab_compare:
         "Unsuccessful (lost seat)/day": round(tr.unsuccessful),
         "Denied access (locked out)/day": round(tr.denied_access),
         "Applications/day": round(tr.applications),
+        "Flat fee revenue (INR/day)": format_inr(tr.flat_fee_revenue),
+        "Charge/premium revenue (INR/day)": format_inr(tr.charge_revenue),
         "Revenue (INR/day)": format_inr(tr.revenue),
     } for tr in picked.tier_results])
     st.dataframe(tier_detail_df, width='stretch')
@@ -440,6 +460,21 @@ with tab_export:
         fig.tight_layout()
         return _make_chart_image(fig, width_cm=24)
 
+    def _stream_chart(summary_df: pd.DataFrame) -> Image:
+        stream_df = summary_df.set_index("Scenario")[
+            ["Flat fee revenue (INR/day)", "Charge/premium revenue (INR/day)"]
+        ]
+        fig, ax = plt.subplots(figsize=(9, 3))
+        # Flat fee=violet, Charge/premium=teal -- matches the dashboard chart.
+        stream_df.plot(kind="bar", stacked=True, ax=ax, color=["#7c3aed", "#0891b2"])
+        ax.set_title("Revenue by stream (INR/day)")
+        ax.yaxis.set_major_formatter(mticker.FuncFormatter(_indian_axis))
+        ax.set_xlabel("")
+        ax.tick_params(axis="x", rotation=15)
+        ax.legend(fontsize=8)
+        fig.tight_layout()
+        return _make_chart_image(fig, width_cm=24)
+
     def build_pdf_report() -> bytes:
         buf = io.BytesIO()
         doc = SimpleDocTemplate(
@@ -506,6 +541,8 @@ with tab_export:
         ))
         story.append(Spacer(1, 0.3 * cm))
         report_summary_df = summary_df.drop(columns=["Denial rate %"]).copy()
+        report_summary_df["Flat fee revenue (INR/day)"] = report_summary_df["Flat fee revenue (INR/day)"].apply(format_inr)
+        report_summary_df["Charge/premium revenue (INR/day)"] = report_summary_df["Charge/premium revenue (INR/day)"].apply(format_inr)
         report_summary_df["Revenue (INR/day)"] = report_summary_df["Revenue (INR/day)"].apply(format_inr)
         report_summary_df["Overhead (INR/day)"] = report_summary_df["Overhead (INR/day)"].apply(format_inr)
         report_summary_df["Net revenue (INR/day)"] = report_summary_df["Net revenue (INR/day)"].apply(format_lakhs)
@@ -516,6 +553,8 @@ with tab_export:
         story.append(_revenue_chart(summary_df))
         story.append(Spacer(1, 0.3 * cm))
         story.append(_volume_chart(summary_df))
+        story.append(Spacer(1, 0.3 * cm))
+        story.append(_stream_chart(summary_df))
         story.append(Paragraph(
             "Note on denial rate: under the current FCFS system this isn't a clean "
             "'sold out' notice -- heavy load at the burst window means most of these "
@@ -553,6 +592,8 @@ with tab_export:
                 "Unsuccessful (lost seat)/day": round(tr.unsuccessful),
                 "Denied access (locked out)/day": round(tr.denied_access),
                 "Applications/day": round(tr.applications),
+                "Flat fee revenue (INR/day)": format_inr(tr.flat_fee_revenue),
+                "Charge/premium revenue (INR/day)": format_inr(tr.charge_revenue),
                 "Revenue (INR/day)": format_inr(tr.revenue),
             } for tr in res.tier_results])
             story.append(_df_to_table(tdf, font_size=7))
