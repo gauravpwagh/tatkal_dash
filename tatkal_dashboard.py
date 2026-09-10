@@ -323,7 +323,11 @@ with tab_compare:
         vol_df = summary_df.set_index("Scenario")[
             ["Successful/day", "Unsuccessful (lost seat)/day", "Denied access (locked out)/day"]
         ]
-        st.bar_chart(vol_df, sort=False)
+        st.bar_chart(
+            vol_df, sort=False, horizontal=True,
+            # Successful=green, Unsuccessful=amber, Denied access=red (worst outcome)
+            color=["#16a34a", "#f59e0b", "#dc2626"],
+        )
 
     st.divider()
     st.subheader("Tier-level detail")
@@ -427,7 +431,8 @@ with tab_export:
             ["Successful/day", "Unsuccessful (lost seat)/day", "Denied access (locked out)/day"]
         ]
         fig, ax = plt.subplots(figsize=(9, 4))
-        vol_df.plot(kind="bar", ax=ax)
+        # Successful=green, Unsuccessful=amber, Denied access=red -- matches the dashboard chart.
+        vol_df.plot(kind="bar", ax=ax, color=["#16a34a", "#f59e0b", "#dc2626"])
         ax.set_title("Successful / unsuccessful / denied-access applications/day")
         ax.set_xlabel("")
         ax.tick_params(axis="x", rotation=15)
