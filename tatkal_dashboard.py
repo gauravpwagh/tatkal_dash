@@ -18,7 +18,6 @@ from datetime import datetime
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-import matplotlib.ticker as mticker
 import pandas as pd
 import streamlit as st
 from reportlab.lib import colors
@@ -134,6 +133,84 @@ def build_stream_figure(summary_df: pd.DataFrame, figsize=(9, 3.6), title: str =
     if title:
         ax.set_title(title)
     ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.18), ncol=2, fontsize=8, frameon=False)
+    fig.tight_layout()
+    return fig
+
+
+def build_revenue_figure(summary_df: pd.DataFrame, figsize=(9, 3.8), title: str = None):
+    """Revenue vs. overhead vs. net revenue, as grouped (not stacked) bars
+    with a value label on every bar and a full, untruncated legend below
+    the chart -- st.bar_chart can't show labels and truncates long legend
+    text with no way to widen it.
+    """
+    cols = ["Revenue (INR/day)", "Overhead (INR/day)", "Net revenue (INR/day)"]
+    labels = ["Revenue (₹ lakh/day)", "Overhead (₹ lakh/day)", "Net revenue (₹ lakh/day)"]
+    plot_colors = ["#2563eb", "#dc2626", "#16a34a"]
+    chart_df = summary_df.set_index("Scenario")[cols] / 100_000
+
+    n_scenarios = len(chart_df)
+    n_series = len(cols)
+    bar_h = 0.8 / n_series
+    y_base = list(range(n_scenarios))
+    x_max = chart_df.to_numpy().max()
+
+    fig, ax = plt.subplots(figsize=figsize)
+    for s, (col, label, color) in enumerate(zip(cols, labels, plot_colors)):
+        offset = (s - (n_series - 1) / 2) * bar_h
+        y = [yb + offset for yb in y_base]
+        values = chart_df[col].tolist()
+        ax.barh(y, values, height=bar_h, color=color, label=label)
+        for yy, v in zip(y, values):
+            ax.text(v + x_max * 0.015, yy, f"₹{v:,.0f} L", va="center", ha="left", fontsize=7, color="#374151")
+
+    ax.set_yticks(y_base)
+    ax.set_yticklabels(chart_df.index)
+    ax.invert_yaxis()  # first scenario (Current) at top, matching the table order
+    ax.set_xlim(0, x_max * 1.22)  # headroom for the value labels
+    ax.set_xlabel("₹ lakh/day")
+    if title:
+        ax.set_title(title)
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.18), ncol=3, fontsize=8, frameon=False)
+    fig.tight_layout()
+    return fig
+
+
+def build_volume_figure(summary_df: pd.DataFrame, figsize=(9, 3.6), title: str = None):
+    """Successful / unsuccessful / denied-access applications, stacked
+    (they genuinely sum to total demand) with per-segment value/% labels,
+    a total-per-bar label, and a full, untruncated legend below the chart.
+    """
+    cols = ["Successful/day", "Unsuccessful (lost seat)/day", "Denied access (locked out)/day"]
+    labels = ["Successful (lakh/day)", "Unsuccessful, lost seat (lakh/day)",
+              "Denied access, locked out (lakh/day)"]
+    plot_colors = ["#16a34a", "#f59e0b", "#dc2626"]
+    vol_df = summary_df.set_index("Scenario")[cols] / 100_000
+    totals = vol_df.sum(axis=1)
+
+    fig, ax = plt.subplots(figsize=figsize)
+    y_pos = range(len(vol_df))
+    left = [0.0] * len(vol_df)
+    for col, label, color in zip(cols, labels, plot_colors):
+        values = vol_df[col].tolist()
+        ax.barh(y_pos, values, left=left, color=color, label=label)
+        for i, (v, l, total) in enumerate(zip(values, left, totals)):
+            if v > 0:
+                ax.text(l + v / 2, i, f"{v:,.1f} L\n({v / total * 100:.0f}%)",
+                         va="center", ha="center", color="white", fontsize=7.5)
+        left = [l + v for l, v in zip(left, values)]
+
+    for i, total in enumerate(totals):
+        ax.text(total + totals.max() * 0.015, i, f"{total:,.1f} L total",
+                 va="center", ha="left", fontsize=7.5, color="#374151")
+
+    ax.set_yticks(list(y_pos))
+    ax.set_yticklabels(vol_df.index)
+    ax.invert_yaxis()  # first scenario (Current) at top, matching the table order
+    ax.set_xlim(0, totals.max() * 1.18)  # headroom for the "total" labels
+    ax.set_xlabel("lakh/day")
+    if title:
+        ax.set_title(title)
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.18), ncol=3, fontsize=7.5, frameon=False)
     fig.tight_layout()
     return fig
 
@@ -341,41 +418,26 @@ with tab_compare:
     c6.metric("Locked out of system -- Proposed + surge", f"{proposed_surge.access_denied_pct:.0f}%")
 
     st.divider()
-    chart_col1, chart_col2 = st.columns(2)
+    st.markdown("**Revenue vs. overhead vs. net revenue (₹ lakh/day)**")
+    st.caption(
+        "Bars are grouped, not stacked -- Net revenue = Revenue - Overhead, "
+        "so stacking all three would double-count."
+    )
+    revenue_fig = build_revenue_figure(summary_df)
+    st.pyplot(revenue_fig)
+    plt.close(revenue_fig)
 
-    with chart_col1:
-        st.markdown("**Revenue vs. overhead vs. net revenue (₹ lakh/day)**")
-        st.caption(
-            "Bars are grouped, not stacked -- Net revenue = Revenue - Overhead, "
-            "so stacking all three would double-count."
-        )
-        chart_df = summary_df.set_index("Scenario")[
-            ["Revenue (INR/day)", "Overhead (INR/day)", "Net revenue (INR/day)"]
-        ] / 100_000
-        chart_df.columns = ["Revenue (₹ lakh/day)", "Overhead (₹ lakh/day)", "Net revenue (₹ lakh/day)"]
-        st.bar_chart(
-            chart_df, stack=False, horizontal=True, sort=False,
-            color=["#2563eb", "#dc2626", "#16a34a"],  # Revenue=blue, Overhead=red, Net revenue=green
-        )
-
-    with chart_col2:
-        st.markdown("**Successful / unsuccessful / denied-access applications (lakh/day)**")
-        st.caption(
-            "'Unsuccessful' entered the process but lost the seat lottery. "
-            "'Denied access' were turned away by the system itself -- infra "
-            "capacity, not seat scarcity. The current system shows both; the "
-            "proposed system is designed for zero denied access."
-        )
-        vol_df = summary_df.set_index("Scenario")[
-            ["Successful/day", "Unsuccessful (lost seat)/day", "Denied access (locked out)/day"]
-        ] / 100_000
-        vol_df.columns = ["Successful (lakh/day)", "Unsuccessful, lost seat (lakh/day)",
-                           "Denied access, locked out (lakh/day)"]
-        st.bar_chart(
-            vol_df, sort=False, horizontal=True,
-            # Successful=green, Unsuccessful=amber, Denied access=red (worst outcome)
-            color=["#16a34a", "#f59e0b", "#dc2626"],
-        )
+    st.divider()
+    st.markdown("**Successful / unsuccessful / denied-access applications (lakh/day)**")
+    st.caption(
+        "'Unsuccessful' entered the process but lost the seat lottery. "
+        "'Denied access' were turned away by the system itself -- infra "
+        "capacity, not seat scarcity. The current system shows both; the "
+        "proposed system is designed for zero denied access."
+    )
+    volume_fig = build_volume_figure(summary_df)
+    st.pyplot(volume_fig)
+    plt.close(volume_fig)
 
     st.divider()
     st.markdown("**Revenue by stream (₹ lakh/day)**")
@@ -426,12 +488,6 @@ with tab_export:
         v = float(v)
         return str(int(v)) if v == int(v) else f"{v:.2f}"
 
-    def _lakhs_axis(value, _pos) -> str:
-        return format_lakhs(value)
-
-    def _lakhs_count_axis(value, _pos) -> str:
-        return f"{indian_grouping(value / 100_000, decimals=2)} L"
-
     def _df_to_table(df: pd.DataFrame, font_size: float = 7, col_widths=None) -> Table:
         # Wrap cell text in Paragraphs so long headers/values wrap inside a
         # fitted column width instead of overflowing past the page edge.
@@ -477,36 +533,13 @@ with tab_export:
         return Image(buf, width=width_cm * cm, height=height_cm * cm)
 
     def _revenue_chart(summary_df: pd.DataFrame) -> Image:
-        chart_df = summary_df.set_index("Scenario")[
-            ["Revenue (INR/day)", "Overhead (INR/day)", "Net revenue (INR/day)"]
-        ]
-        chart_df.columns = ["Revenue (₹ lakh/day)", "Overhead (₹ lakh/day)", "Net revenue (₹ lakh/day)"]
-        fig, ax = plt.subplots(figsize=(9, 4))
-        # Revenue=blue, Overhead=red, Net revenue=green -- matches the dashboard chart.
-        chart_df.plot(kind="bar", ax=ax, color=["#2563eb", "#dc2626", "#16a34a"])
-        ax.set_title("Revenue vs. overhead vs. net revenue (₹ lakh/day)")
-        ax.yaxis.set_major_formatter(mticker.FuncFormatter(_lakhs_axis))
-        ax.set_xlabel("")
-        ax.tick_params(axis="x", rotation=15)
-        ax.legend(fontsize=8)
-        fig.tight_layout()
+        fig = build_revenue_figure(summary_df, figsize=(9, 3.8),
+                                    title="Revenue vs. overhead vs. net revenue (₹ lakh/day)")
         return _make_chart_image(fig, width_cm=24)
 
     def _volume_chart(summary_df: pd.DataFrame) -> Image:
-        vol_df = summary_df.set_index("Scenario")[
-            ["Successful/day", "Unsuccessful (lost seat)/day", "Denied access (locked out)/day"]
-        ]
-        vol_df.columns = ["Successful (lakh/day)", "Unsuccessful, lost seat (lakh/day)",
-                           "Denied access, locked out (lakh/day)"]
-        fig, ax = plt.subplots(figsize=(9, 4))
-        # Successful=green, Unsuccessful=amber, Denied access=red -- matches the dashboard chart.
-        vol_df.plot(kind="bar", ax=ax, color=["#16a34a", "#f59e0b", "#dc2626"])
-        ax.set_title("Successful / unsuccessful / denied-access applications (lakh/day)")
-        ax.yaxis.set_major_formatter(mticker.FuncFormatter(_lakhs_count_axis))
-        ax.set_xlabel("")
-        ax.tick_params(axis="x", rotation=15)
-        ax.legend(fontsize=8)
-        fig.tight_layout()
+        fig = build_volume_figure(summary_df, figsize=(9, 3.6),
+                                   title="Successful / unsuccessful / denied-access applications (lakh/day)")
         return _make_chart_image(fig, width_cm=24)
 
     def _stream_chart(summary_df: pd.DataFrame) -> Image:
