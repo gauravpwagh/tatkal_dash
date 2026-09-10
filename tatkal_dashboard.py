@@ -96,6 +96,49 @@ def format_lakhs(value: float) -> str:
 
 
 # --------------------------------------------------------------------------
+# Shared chart builder (used by both the dashboard tab and the PDF report)
+# --------------------------------------------------------------------------
+
+def build_stream_figure(summary_df: pd.DataFrame, figsize=(9, 3.6), title: str = None):
+    """Revenue-by-stream chart with per-segment value/% labels and a full,
+    untruncated legend -- st.bar_chart can't do either (Vega-Lite truncates
+    long legend text with no way to widen it, and has no data-label option).
+    """
+    stream_df = summary_df.set_index("Scenario")[
+        ["Flat fee revenue (INR/day)", "Charge/premium revenue (INR/day)"]
+    ]
+    flat = stream_df["Flat fee revenue (INR/day)"] / 100_000
+    charge = stream_df["Charge/premium revenue (INR/day)"] / 100_000
+    totals = flat + charge
+
+    fig, ax = plt.subplots(figsize=figsize)
+    y_pos = range(len(stream_df))
+    ax.barh(y_pos, flat, color="#7c3aed", label="Flat fee revenue (₹ lakh/day)")
+    ax.barh(y_pos, charge, left=flat, color="#0891b2", label="Charge/premium revenue (₹ lakh/day)")
+
+    for i, (f, c, total) in enumerate(zip(flat, charge, totals)):
+        if f > 0:
+            ax.text(f / 2, i, f"₹{f:,.0f} L\n({f / total * 100:.0f}%)",
+                     va="center", ha="center", color="white", fontsize=7.5)
+        if c > 0:
+            ax.text(f + c / 2, i, f"₹{c:,.0f} L\n({c / total * 100:.0f}%)",
+                     va="center", ha="center", color="white", fontsize=7.5)
+        ax.text(total + totals.max() * 0.015, i, f"₹{total:,.0f} L total",
+                 va="center", ha="left", fontsize=7.5, color="#374151")
+
+    ax.set_yticks(list(y_pos))
+    ax.set_yticklabels(stream_df.index)
+    ax.invert_yaxis()  # first scenario (Current) at top, matching the table order
+    ax.set_xlim(0, totals.max() * 1.18)  # headroom for the "total" labels
+    ax.set_xlabel("₹ lakh/day")
+    if title:
+        ax.set_title(title)
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.18), ncol=2, fontsize=8, frameon=False)
+    fig.tight_layout()
+    return fig
+
+
+# --------------------------------------------------------------------------
 # Session-state init
 # --------------------------------------------------------------------------
 
@@ -342,14 +385,9 @@ with tab_compare:
         "bookers: the Tatkal surcharge under Current, the reduced premium under "
         "Proposed. The two bars are stacked because they genuinely sum to Revenue."
     )
-    stream_df = summary_df.set_index("Scenario")[
-        ["Flat fee revenue (INR/day)", "Charge/premium revenue (INR/day)"]
-    ] / 100_000
-    stream_df.columns = ["Flat fee revenue (₹ lakh/day)", "Charge/premium revenue (₹ lakh/day)"]
-    st.bar_chart(
-        stream_df, sort=False, horizontal=True,
-        color=["#7c3aed", "#0891b2"],  # Flat fee=violet, Charge/premium=teal
-    )
+    stream_fig = build_stream_figure(summary_df)
+    st.pyplot(stream_fig)
+    plt.close(stream_fig)
 
     st.divider()
     st.subheader("Tier-level detail")
@@ -472,19 +510,7 @@ with tab_export:
         return _make_chart_image(fig, width_cm=24)
 
     def _stream_chart(summary_df: pd.DataFrame) -> Image:
-        stream_df = summary_df.set_index("Scenario")[
-            ["Flat fee revenue (INR/day)", "Charge/premium revenue (INR/day)"]
-        ]
-        stream_df.columns = ["Flat fee revenue (₹ lakh/day)", "Charge/premium revenue (₹ lakh/day)"]
-        fig, ax = plt.subplots(figsize=(9, 3))
-        # Flat fee=violet, Charge/premium=teal -- matches the dashboard chart.
-        stream_df.plot(kind="bar", stacked=True, ax=ax, color=["#7c3aed", "#0891b2"])
-        ax.set_title("Revenue by stream (₹ lakh/day)")
-        ax.yaxis.set_major_formatter(mticker.FuncFormatter(_lakhs_axis))
-        ax.set_xlabel("")
-        ax.tick_params(axis="x", rotation=15)
-        ax.legend(fontsize=8)
-        fig.tight_layout()
+        fig = build_stream_figure(summary_df, figsize=(9, 3.2), title="Revenue by stream (₹ lakh/day)")
         return _make_chart_image(fig, width_cm=24)
 
     def build_pdf_report() -> bytes:
