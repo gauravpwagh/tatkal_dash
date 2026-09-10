@@ -10,10 +10,45 @@ All calculation logic lives in tatkal_model.py -- this file is purely
 presentation (inputs, tables, charts, report export).
 """
 
+import base64
+import io
+import os
 from datetime import datetime
 
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import matplotlib.ticker as mticker
 import pandas as pd
 import streamlit as st
+from reportlab.lib import colors
+from reportlab.lib.enums import TA_CENTER, TA_RIGHT
+from reportlab.lib.pagesizes import A4, landscape
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import cm
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.platypus import (
+    Image,
+    PageBreak,
+    Paragraph,
+    SimpleDocTemplate,
+    Spacer,
+    Table,
+    TableStyle,
+)
+
+# DejaVu Sans (bundled with matplotlib) has a glyph for the Indian Rupee
+# sign (U+20B9); the standard PDF Helvetica font does not, so register it
+# for use in report text and tables.
+_FONT_DIR = os.path.join(matplotlib.get_data_path(), "fonts", "ttf")
+pdfmetrics.registerFont(TTFont("DejaVuSans", os.path.join(_FONT_DIR, "DejaVuSans.ttf")))
+pdfmetrics.registerFont(TTFont("DejaVuSans-Bold", os.path.join(_FONT_DIR, "DejaVuSans-Bold.ttf")))
+pdfmetrics.registerFontFamily(
+    "DejaVuSans", normal="DejaVuSans", bold="DejaVuSans-Bold",
+    italic="DejaVuSans", boldItalic="DejaVuSans-Bold",
+)
+plt.rcParams["font.family"] = "DejaVu Sans"
 
 from tatkal_model import (
     TierInput,
@@ -269,90 +304,231 @@ with tab_compare:
     st.dataframe(tier_detail_df, width='stretch')
 
 # --------------------------------------------------------------------------
-# Tab 3: Export report
+# Tab 3: Export report (PDF)
 # --------------------------------------------------------------------------
 
 with tab_export:
     st.subheader("Export a summary report")
     st.markdown(
-        "Generates a Markdown report listing every input variable and the "
-        "three-scenario comparison, timestamped at generation time."
+        "Generates a PDF report listing every input variable, the "
+        "three-scenario comparison table, the comparison charts from the "
+        "**Scenario comparison** tab, and tier-level detail -- timestamped "
+        "at generation time."
     )
 
-    def build_report() -> str:
-        lines = []
-        lines.append("# Tatkal booking reform -- analysis report")
-        lines.append(f"\nGenerated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        lines.append(
-            "\n> Figures below reflect user-entered inputs in this session. "
-            "Defaults are illustrative placeholders, not verified IRCTC data."
+    def _fmt_num(v) -> str:
+        v = float(v)
+        return str(int(v)) if v == int(v) else f"{v:.2f}"
+
+    def _indian_axis(value, _pos) -> str:
+        return format_inr(value)
+
+    def _df_to_table(df: pd.DataFrame, font_size: float = 7, col_widths=None) -> Table:
+        # Wrap cell text in Paragraphs so long headers/values wrap inside a
+        # fitted column width instead of overflowing past the page edge.
+        header_style = ParagraphStyle(
+            "th", fontName="DejaVuSans-Bold", fontSize=font_size,
+            leading=font_size + 2, textColor=colors.white, alignment=TA_CENTER,
         )
+        left_style = ParagraphStyle(
+            "td_left", fontName="DejaVuSans", fontSize=font_size, leading=font_size + 2,
+        )
+        right_style = ParagraphStyle(
+            "td_right", fontName="DejaVuSans", fontSize=font_size,
+            leading=font_size + 2, alignment=TA_RIGHT,
+        )
+        header_row = [Paragraph(str(c), header_style) for c in df.columns]
+        body_rows = []
+        for row in df.astype(str).values.tolist():
+            body_rows.append([
+                Paragraph(v, left_style if i == 0 else right_style)
+                for i, v in enumerate(row)
+            ])
+        data = [header_row] + body_rows
+        table = Table(data, colWidths=col_widths, repeatRows=1)
+        table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1f2937")),
+            ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#cccccc")),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f3f4f6")]),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 3),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+            ("TOPPADDING", (0, 0), (-1, -1), 2),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+        ]))
+        return table
 
-        lines.append("\n## 1. Input variables\n")
-        lines.append("### 1.1 Demand, fare & charge structure by tier\n")
-        lines.append(st.session_state.tiers_df.to_markdown(index=False))
+    def _make_chart_image(fig, width_cm: float) -> Image:
+        buf = io.BytesIO()
+        fig.savefig(buf, format="png", dpi=150, bbox_inches="tight")
+        plt.close(fig)
+        buf.seek(0)
+        w_in, h_in = fig.get_size_inches()
+        height_cm = width_cm * (h_in / w_in)
+        return Image(buf, width=width_cm * cm, height=height_cm * cm)
 
-        lines.append("\n### 1.2 System overhead assumptions\n")
+    def _revenue_chart(summary_df: pd.DataFrame) -> Image:
+        chart_df = summary_df.set_index("Scenario")[
+            ["Revenue (INR/day)", "Overhead (INR/day)", "Net revenue (INR/day)"]
+        ]
+        fig, ax = plt.subplots(figsize=(9, 4))
+        chart_df.plot(kind="bar", ax=ax)
+        ax.set_title("Revenue vs. overhead vs. net revenue (INR/day)")
+        ax.yaxis.set_major_formatter(mticker.FuncFormatter(_indian_axis))
+        ax.set_xlabel("")
+        ax.tick_params(axis="x", rotation=15)
+        ax.legend(fontsize=8)
+        fig.tight_layout()
+        return _make_chart_image(fig, width_cm=24)
+
+    def _volume_chart(summary_df: pd.DataFrame) -> Image:
+        vol_df = summary_df.set_index("Scenario")[["Successful/day", "Unsuccessful/day"]]
+        fig, ax = plt.subplots(figsize=(6, 4))
+        vol_df.plot(kind="bar", ax=ax)
+        ax.set_title("Successful vs. unsuccessful applications/day")
+        ax.set_xlabel("")
+        ax.tick_params(axis="x", rotation=15)
+        ax.legend(fontsize=8)
+        fig.tight_layout()
+        return _make_chart_image(fig, width_cm=13)
+
+    def _denial_chart(summary_df: pd.DataFrame) -> Image:
+        fig, ax = plt.subplots(figsize=(6, 4))
+        summary_df.set_index("Scenario")["Denial rate %"].plot(kind="bar", ax=ax, color="#dc2626")
+        ax.set_title("Denial rate (% of applicants who do not get a seat)")
+        ax.set_xlabel("")
+        ax.tick_params(axis="x", rotation=15)
+        fig.tight_layout()
+        return _make_chart_image(fig, width_cm=13)
+
+    def build_pdf_report() -> bytes:
+        buf = io.BytesIO()
+        doc = SimpleDocTemplate(
+            buf, pagesize=landscape(A4),
+            leftMargin=1.2 * cm, rightMargin=1.2 * cm,
+            topMargin=1.2 * cm, bottomMargin=1.2 * cm,
+        )
+        styles = getSampleStyleSheet()
+        for name, bold in [("Title", True), ("Normal", False), ("Italic", False),
+                            ("Heading1", True), ("Heading2", True)]:
+            styles[name].fontName = "DejaVuSans-Bold" if bold else "DejaVuSans"
+        story = []
+
+        story.append(Paragraph("Tatkal booking reform -- analysis report", styles["Title"]))
+        story.append(Paragraph(
+            f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles["Normal"]
+        ))
+        story.append(Spacer(1, 0.3 * cm))
+        story.append(Paragraph(
+            "Figures below reflect user-entered inputs in this session. "
+            "Defaults are illustrative placeholders, not verified IRCTC data.",
+            styles["Italic"],
+        ))
+        story.append(Spacer(1, 0.5 * cm))
+
+        story.append(Paragraph("1. Input variables", styles["Heading1"]))
+        story.append(Paragraph("1.1 Demand, fare & charge structure by tier", styles["Heading2"]))
+        tiers_display = st.session_state.tiers_df.copy()
+        for col in tiers_display.columns:
+            if col != "Tier":
+                tiers_display[col] = tiers_display[col].apply(_fmt_num)
+        n_other_cols = len(tiers_display.columns) - 1
+        tier_col_widths = [3.0 * cm] + [2.3 * cm] * n_other_cols
+        story.append(_df_to_table(tiers_display, font_size=6.5, col_widths=tier_col_widths))
+        story.append(Spacer(1, 0.4 * cm))
+
+        story.append(Paragraph("1.2 System overhead assumptions", styles["Heading2"]))
         oh = st.session_state.overhead
-        lines.append(f"- Current peak-infrastructure cost: {format_inr(oh.current_infra_cost_per_day)}/day")
-        lines.append(f"- Avg. lock/payment attempts per confirmed seat: {oh.lock_release_multiplier:g}")
-        lines.append(f"- Cost per failed payment attempt: INR {oh.payment_failure_cost:g}")
-        lines.append(f"- Proposed peak-infrastructure cost: {format_inr(oh.proposed_infra_cost_per_day)}/day")
-        lines.append(f"- Verification cost per application: INR {oh.verification_cost_per_application:g}")
-        lines.append(f"- Refund/release cost per unsuccessful applicant: INR {oh.refund_processing_cost_per_unsuccessful:g}")
-        lines.append(f"- Scenario C demand multiplier: {st.session_state.surge_multiplier:g}x")
+        for line in [
+            f"Current peak-infrastructure cost: {format_inr(oh.current_infra_cost_per_day)}/day",
+            f"Avg. lock/payment attempts per confirmed seat: {oh.lock_release_multiplier:g}",
+            f"Cost per failed payment attempt: INR {oh.payment_failure_cost:g}",
+            f"Proposed peak-infrastructure cost: {format_inr(oh.proposed_infra_cost_per_day)}/day",
+            f"Verification cost per application: INR {oh.verification_cost_per_application:g}",
+            f"Refund/release cost per unsuccessful applicant: INR {oh.refund_processing_cost_per_unsuccessful:g}",
+            f"Scenario C demand multiplier: {st.session_state.surge_multiplier:g}x",
+        ]:
+            story.append(Paragraph(f"&bull; {line}", styles["Normal"]))
+        story.append(Spacer(1, 0.5 * cm))
 
-        lines.append("\n## 2. Scenario comparison\n")
+        story.append(Paragraph("2. Scenario comparison", styles["Heading1"]))
+        story.append(Paragraph(
+            "Scenario A = current FCFS system today. Scenario B = proposed computerized "
+            "random allotment at today's demand. Scenario C = proposed system if applications "
+            f"rise to {st.session_state.surge_multiplier:g}x today's level while seats stay fixed.",
+            styles["Normal"],
+        ))
+        story.append(Spacer(1, 0.3 * cm))
         report_summary_df = summary_df.copy()
         report_summary_df["Revenue (INR/day)"] = report_summary_df["Revenue (INR/day)"].apply(format_inr)
         report_summary_df["Overhead (INR/day)"] = report_summary_df["Overhead (INR/day)"].apply(format_inr)
         report_summary_df["Net revenue (INR/day)"] = report_summary_df["Net revenue (INR/day)"].apply(format_lakhs)
-        lines.append(report_summary_df.to_markdown(index=False))
+        story.append(_df_to_table(report_summary_df, font_size=6.5))
+        story.append(Spacer(1, 0.5 * cm))
 
-        lines.append("\n## 3. Key takeaways\n")
+        story.append(Paragraph("Scenario comparison charts", styles["Heading2"]))
+        story.append(_revenue_chart(summary_df))
+        story.append(Spacer(1, 0.3 * cm))
+        chart_row = Table(
+            [[_volume_chart(summary_df), _denial_chart(summary_df)]],
+            colWidths=[13.5 * cm, 13.5 * cm],
+        )
+        chart_row.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP")]))
+        story.append(chart_row)
+        story.append(Spacer(1, 0.5 * cm))
+
+        story.append(Paragraph("3. Key takeaways", styles["Heading1"]))
         rev_delta_b = proposed.net_revenue - current.net_revenue
         rev_delta_c = proposed_surge.net_revenue - current.net_revenue
-        lines.append(
-            f"- Moving from Current to Proposed (same demand) changes net revenue "
-            f"by {format_lakhs(rev_delta_b)}/day."
-        )
-        lines.append(
-            f"- If demand rises {st.session_state.surge_multiplier:g}x post-reform (Scenario C), "
+        for line in [
+            f"Moving from Current to Proposed (same demand) changes net revenue "
+            f"by {format_lakhs(rev_delta_b)}/day.",
+            f"If demand rises {st.session_state.surge_multiplier:g}x post-reform (Scenario C), "
             f"net revenue changes by {format_lakhs(rev_delta_c)}/day versus Current, "
             f"and overhead moves from {format_inr(current.total_overhead)}/day to "
-            f"{format_inr(proposed_surge.total_overhead)}/day."
-        )
-        lines.append(
-            f"- Denial rate moves from {current.denial_rate_pct:.1f}% (Current) to "
+            f"{format_inr(proposed_surge.total_overhead)}/day.",
+            f"Denial rate moves from {current.denial_rate_pct:.1f}% (Current) to "
             f"{proposed.denial_rate_pct:.1f}% (Proposed, same demand) to "
-            f"{proposed_surge.denial_rate_pct:.1f}% (Proposed, surge demand)."
-        )
+            f"{proposed_surge.denial_rate_pct:.1f}% (Proposed, surge demand).",
+        ]:
+            story.append(Paragraph(f"&bull; {line}", styles["Normal"]))
 
-        lines.append("\n## 4. Tier-level detail (all scenarios)\n")
+        story.append(PageBreak())
+        story.append(Paragraph("4. Tier-level detail (all scenarios)", styles["Heading1"]))
         for label, res in [("Current", current), ("Proposed (same demand)", proposed),
                             ("Proposed (demand surge)", proposed_surge)]:
-            lines.append(f"\n### {label}\n")
+            story.append(Paragraph(label, styles["Heading2"]))
             tdf = pd.DataFrame([{
                 "Tier": tr.name, "Successful/day": round(tr.successful),
                 "Unsuccessful/day": round(tr.unsuccessful),
                 "Applications/day": round(tr.applications),
                 "Revenue (INR/day)": format_inr(tr.revenue),
             } for tr in res.tier_results])
-            lines.append(tdf.to_markdown(index=False))
+            story.append(_df_to_table(tdf, font_size=7))
+            story.append(Spacer(1, 0.4 * cm))
 
-        lines.append(
-            "\n---\n*Generated by the Tatkal Reform Analysis Tool. "
-            "See README.md for model assumptions, formulas, and extension points.*"
-        )
-        return "\n".join(lines)
+        story.append(Spacer(1, 0.5 * cm))
+        story.append(Paragraph(
+            "Generated by the Tatkal Reform Analysis Tool. See README.md for model "
+            "assumptions, formulas, and extension points.",
+            styles["Italic"],
+        ))
 
-    report_text = build_report()
+        doc.build(story)
+        return buf.getvalue()
+
+    pdf_bytes = build_pdf_report()
     st.download_button(
-        label="Download report (Markdown)",
-        data=report_text,
-        file_name=f"tatkal_analysis_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md",
-        mime="text/markdown",
+        label="Download report (PDF)",
+        data=pdf_bytes,
+        file_name=f"tatkal_analysis_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
+        mime="application/pdf",
     )
 
     with st.expander("Preview report"):
-        st.markdown(report_text)
+        b64 = base64.b64encode(pdf_bytes).decode()
+        st.markdown(
+            f'<iframe src="data:application/pdf;base64,{b64}" '
+            f'width="100%" height="800" style="border:1px solid #ddd;"></iframe>',
+            unsafe_allow_html=True,
+        )
