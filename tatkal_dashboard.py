@@ -329,7 +329,7 @@ with tab_inputs:
         st.caption(
             f"→ Current system infra capacity: **{_capacity_pct * 100:.0f}%** of demand can "
             f"even enter the process at today's spend. The rest are denied access outright, "
-            f"separate from those who enter and lose the seat lottery."
+            f"separate from those who enter but are not allocated a seat."
         )
         oh.lock_release_multiplier = st.number_input(
             "Avg. lock/payment attempts per confirmed seat",
@@ -413,7 +413,7 @@ with tab_compare:
 
     c4, c5, c6 = st.columns(3)
     c4.metric("Locked out of system -- Current", f"{current.access_denied_pct:.0f}%",
-              help="Applicants denied access outright by infra capacity, before the seat lottery even runs.")
+              help="Applicants denied access outright by infra capacity, before entering seat allocation.")
     c5.metric("Locked out of system -- Proposed", f"{proposed.access_denied_pct:.0f}%")
     c6.metric("Locked out of system -- Proposed + surge", f"{proposed_surge.access_denied_pct:.0f}%")
 
@@ -430,7 +430,7 @@ with tab_compare:
     st.divider()
     st.markdown("**Successful / unsuccessful / denied-access applications (lakh/day)**")
     st.caption(
-        "'Unsuccessful' entered the process but lost the seat lottery. "
+        "'Unsuccessful' entered the process but was not allocated a seat. "
         "'Denied access' were turned away by the system itself -- infra "
         "capacity, not seat scarcity. The current system shows both; the "
         "proposed system is designed for zero denied access."
@@ -647,7 +647,7 @@ with tab_export:
             f"{format_inr(proposed_surge.total_overhead)}/day.",
             f"Under Current, {current.access_denied_pct:.1f}% of demand is denied "
             f"access outright by infra capacity (never got to compete for a seat) "
-            f"and {current.seat_lottery_denial_pct:.1f}% lost the seat lottery after "
+            f"and {current.seat_allocation_denial_pct:.1f}% were not allocated a seat after "
             f"getting in. The Proposed system is designed for 0% denied access at "
             f"any demand level -- everyone gets into the process.",
         ]:

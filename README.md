@@ -7,8 +7,8 @@ shot at a seat -- including a scenario where post-reform demand rises
 while seat capacity stays fixed.
 
 A key distinction the tool draws out: under today's system, "not getting
-a ticket" can mean two very different things -- losing a fair seat
-lottery after getting into the booking process, or being locked out of
+a ticket" can mean two very different things -- not being allocated a
+seat after getting into the booking process, or being locked out of
 the process entirely because the infra couldn't absorb the burst load.
 The proposed system is modelled as always letting everyone in (see
 [§3.2](#32-scenarios)).
@@ -92,13 +92,13 @@ Each tier carries:
 Three scenarios are computed from the same tier inputs:
 
 - **A -- Current system** (`compute_current`): access is gated by infra
-  capacity *before* the seat lottery even runs. `capacity_pct =
+  capacity *before* seat allocation even runs. `capacity_pct =
   current_infra_cost_per_day / current_infra_required_cost_per_day`
   (capped at 100%) caps what share of `requests_per_day` can get into
   the process at all; the rest are `denied_access` -- turned away by an
   overloaded system, never competing for a seat. Of those who get in,
   successful bookings = `min(seats, accessible_requests)`, and the
-  remainder are `unsuccessful` (lost the seat lottery to ordinary
+  remainder are `unsuccessful` (not allocated a seat due to ordinary
   scarcity). These are two distinct failure modes, surfaced separately
   everywhere in the UI -- see [§3.2.1](#321-two-ways-to-not-get-a-ticket).
   Revenue = successful bookings x current surcharge. Overhead = flat
@@ -125,7 +125,7 @@ Three scenarios are computed from the same tier inputs:
   rises.
 
 All three scenarios return a `ScenarioResult` with `.net_revenue`
-(`revenue - overhead`), `.access_denied_pct`, `.seat_lottery_denial_pct`,
+(`revenue - overhead`), `.access_denied_pct`, `.seat_allocation_denial_pct`,
 and `.denial_rate_pct` (the sum of the two -- kept for anyone who wants
 the combined figure, though the dashboard and PDF report now surface the
 two components directly instead) computed as properties, so adding a new
@@ -141,9 +141,9 @@ one "denial rate," because they call for different fixes:
   `current_infra_required_cost_per_day` below). The fix is infra
   investment or -- what the Proposed system actually does -- redesigning
   intake so a burst-capacity investment isn't needed in the first place.
-- **Unsuccessful (lost seat)** -- got into the process, lost a fair
-  lottery to ordinary scarcity (more requests than seats). Possible under
-  every scenario; the only fix is more seats or less demand.
+- **Unsuccessful (lost seat)** -- got into the process, but wasn't
+  allocated a seat due to ordinary scarcity (more requests than seats).
+  Possible under every scenario; the only fix is more seats or less demand.
 
 The illustrative defaults make this concrete: Current spends the same
 ₹15L/day on infra as Proposed, but because Current needs to absorb an
