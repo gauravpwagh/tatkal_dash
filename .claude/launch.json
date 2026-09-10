@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "tatkal-dashboard",
+      "runtimeExecutable": "venv/Scripts/streamlit.exe",
+      "runtimeArgs": ["run", "tatkal_dashboard.py", "--server.headless=true"],
+      "port": 8501
+    }
+  ]
+}
