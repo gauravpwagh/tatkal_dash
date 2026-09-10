@@ -301,21 +301,22 @@ with tab_compare:
     chart_col1, chart_col2 = st.columns(2)
 
     with chart_col1:
-        st.markdown("**Revenue vs. overhead vs. net revenue (INR/day)**")
+        st.markdown("**Revenue vs. overhead vs. net revenue (₹ lakh/day)**")
         st.caption(
             "Bars are grouped, not stacked -- Net revenue = Revenue - Overhead, "
             "so stacking all three would double-count."
         )
         chart_df = summary_df.set_index("Scenario")[
             ["Revenue (INR/day)", "Overhead (INR/day)", "Net revenue (INR/day)"]
-        ]
+        ] / 100_000
+        chart_df.columns = ["Revenue (₹ lakh/day)", "Overhead (₹ lakh/day)", "Net revenue (₹ lakh/day)"]
         st.bar_chart(
             chart_df, stack=False, horizontal=True, sort=False,
             color=["#2563eb", "#dc2626", "#16a34a"],  # Revenue=blue, Overhead=red, Net revenue=green
         )
 
     with chart_col2:
-        st.markdown("**Successful / unsuccessful / denied-access applications/day**")
+        st.markdown("**Successful / unsuccessful / denied-access applications (lakh/day)**")
         st.caption(
             "'Unsuccessful' entered the process but lost the seat lottery. "
             "'Denied access' were turned away by the system itself -- infra "
@@ -324,7 +325,9 @@ with tab_compare:
         )
         vol_df = summary_df.set_index("Scenario")[
             ["Successful/day", "Unsuccessful (lost seat)/day", "Denied access (locked out)/day"]
-        ]
+        ] / 100_000
+        vol_df.columns = ["Successful (lakh/day)", "Unsuccessful, lost seat (lakh/day)",
+                           "Denied access, locked out (lakh/day)"]
         st.bar_chart(
             vol_df, sort=False, horizontal=True,
             # Successful=green, Unsuccessful=amber, Denied access=red (worst outcome)
@@ -332,7 +335,7 @@ with tab_compare:
         )
 
     st.divider()
-    st.markdown("**Revenue by stream (INR/day)**")
+    st.markdown("**Revenue by stream (₹ lakh/day)**")
     st.caption(
         "Flat fee is paid by every applicant, win or lose -- 0 under Current, "
         "which has no flat-fee stream. Charge/premium is paid only by successful "
@@ -341,7 +344,8 @@ with tab_compare:
     )
     stream_df = summary_df.set_index("Scenario")[
         ["Flat fee revenue (INR/day)", "Charge/premium revenue (INR/day)"]
-    ]
+    ] / 100_000
+    stream_df.columns = ["Flat fee revenue (₹ lakh/day)", "Charge/premium revenue (₹ lakh/day)"]
     st.bar_chart(
         stream_df, sort=False, horizontal=True,
         color=["#7c3aed", "#0891b2"],  # Flat fee=violet, Charge/premium=teal
@@ -384,8 +388,11 @@ with tab_export:
         v = float(v)
         return str(int(v)) if v == int(v) else f"{v:.2f}"
 
-    def _indian_axis(value, _pos) -> str:
-        return format_inr(value)
+    def _lakhs_axis(value, _pos) -> str:
+        return format_lakhs(value)
+
+    def _lakhs_count_axis(value, _pos) -> str:
+        return f"{indian_grouping(value / 100_000, decimals=2)} L"
 
     def _df_to_table(df: pd.DataFrame, font_size: float = 7, col_widths=None) -> Table:
         # Wrap cell text in Paragraphs so long headers/values wrap inside a
@@ -435,11 +442,12 @@ with tab_export:
         chart_df = summary_df.set_index("Scenario")[
             ["Revenue (INR/day)", "Overhead (INR/day)", "Net revenue (INR/day)"]
         ]
+        chart_df.columns = ["Revenue (₹ lakh/day)", "Overhead (₹ lakh/day)", "Net revenue (₹ lakh/day)"]
         fig, ax = plt.subplots(figsize=(9, 4))
         # Revenue=blue, Overhead=red, Net revenue=green -- matches the dashboard chart.
         chart_df.plot(kind="bar", ax=ax, color=["#2563eb", "#dc2626", "#16a34a"])
-        ax.set_title("Revenue vs. overhead vs. net revenue (INR/day)")
-        ax.yaxis.set_major_formatter(mticker.FuncFormatter(_indian_axis))
+        ax.set_title("Revenue vs. overhead vs. net revenue (₹ lakh/day)")
+        ax.yaxis.set_major_formatter(mticker.FuncFormatter(_lakhs_axis))
         ax.set_xlabel("")
         ax.tick_params(axis="x", rotation=15)
         ax.legend(fontsize=8)
@@ -450,10 +458,13 @@ with tab_export:
         vol_df = summary_df.set_index("Scenario")[
             ["Successful/day", "Unsuccessful (lost seat)/day", "Denied access (locked out)/day"]
         ]
+        vol_df.columns = ["Successful (lakh/day)", "Unsuccessful, lost seat (lakh/day)",
+                           "Denied access, locked out (lakh/day)"]
         fig, ax = plt.subplots(figsize=(9, 4))
         # Successful=green, Unsuccessful=amber, Denied access=red -- matches the dashboard chart.
         vol_df.plot(kind="bar", ax=ax, color=["#16a34a", "#f59e0b", "#dc2626"])
-        ax.set_title("Successful / unsuccessful / denied-access applications/day")
+        ax.set_title("Successful / unsuccessful / denied-access applications (lakh/day)")
+        ax.yaxis.set_major_formatter(mticker.FuncFormatter(_lakhs_count_axis))
         ax.set_xlabel("")
         ax.tick_params(axis="x", rotation=15)
         ax.legend(fontsize=8)
@@ -464,11 +475,12 @@ with tab_export:
         stream_df = summary_df.set_index("Scenario")[
             ["Flat fee revenue (INR/day)", "Charge/premium revenue (INR/day)"]
         ]
+        stream_df.columns = ["Flat fee revenue (₹ lakh/day)", "Charge/premium revenue (₹ lakh/day)"]
         fig, ax = plt.subplots(figsize=(9, 3))
         # Flat fee=violet, Charge/premium=teal -- matches the dashboard chart.
         stream_df.plot(kind="bar", stacked=True, ax=ax, color=["#7c3aed", "#0891b2"])
-        ax.set_title("Revenue by stream (INR/day)")
-        ax.yaxis.set_major_formatter(mticker.FuncFormatter(_indian_axis))
+        ax.set_title("Revenue by stream (₹ lakh/day)")
+        ax.yaxis.set_major_formatter(mticker.FuncFormatter(_lakhs_axis))
         ax.set_xlabel("")
         ax.tick_params(axis="x", rotation=15)
         ax.legend(fontsize=8)
