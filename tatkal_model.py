@@ -125,7 +125,15 @@ class ScenarioResult:
 
     @property
     def denial_rate_pct(self) -> float:
-        """Share of applicants who do NOT get a seat."""
+        """Share of applicants who do NOT get a seat.
+
+        Under the current FCFS system this isn't a clean "sold out"
+        message -- heavy load at the burst window means most of these
+        applicants are kept waiting or told to try again as seat
+        locks are repeatedly grabbed and released (see
+        `lock_release_multiplier`), which is where the frustration
+        comes from, not just the eventual failure to book.
+        """
         if self.total_applications == 0:
             return 0.0
         return 100.0 * self.total_unsuccessful / self.total_applications

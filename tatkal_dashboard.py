@@ -284,6 +284,12 @@ with tab_compare:
 
     st.divider()
     st.markdown("**Denial rate (% of applicants who do not get a seat)**")
+    st.caption(
+        "Under the current FCFS system this isn't a clean 'sold out' notice -- "
+        "heavy load at the burst window means most of these applicants are kept "
+        "waiting or told to try again as seat locks are repeatedly grabbed and "
+        "released, which is where the frustration comes from."
+    )
     st.bar_chart(summary_df.set_index("Scenario")[["Denial rate %"]])
 
     st.divider()
@@ -475,6 +481,13 @@ with tab_export:
         )
         chart_row.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP")]))
         story.append(chart_row)
+        story.append(Paragraph(
+            "Note on denial rate: under the current FCFS system this isn't a clean "
+            "'sold out' notice -- heavy load at the burst window means most of these "
+            "applicants are kept waiting or told to try again as seat locks are "
+            "repeatedly grabbed and released, which is where the frustration comes from.",
+            styles["Italic"],
+        ))
         story.append(Spacer(1, 0.5 * cm))
 
         story.append(Paragraph("3. Key takeaways", styles["Heading1"]))
