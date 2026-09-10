@@ -505,7 +505,7 @@ with tab_export:
             styles["Normal"],
         ))
         story.append(Spacer(1, 0.3 * cm))
-        report_summary_df = summary_df.copy()
+        report_summary_df = summary_df.drop(columns=["Denial rate %"]).copy()
         report_summary_df["Revenue (INR/day)"] = report_summary_df["Revenue (INR/day)"].apply(format_inr)
         report_summary_df["Overhead (INR/day)"] = report_summary_df["Overhead (INR/day)"].apply(format_inr)
         report_summary_df["Net revenue (INR/day)"] = report_summary_df["Net revenue (INR/day)"].apply(format_lakhs)
